@@ -8,6 +8,7 @@ interface ReaderInputProps {
     text?: string;
     imageBase64?: string;
     imageMimeType?: string;
+    targetLanguage?: string;
     targetLevel: string;
     l1Language: string;
   }) => void;
@@ -16,9 +17,20 @@ interface ReaderInputProps {
 
 const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1'] as const;
 
-const L1_LANGUAGES = [
+export const TARGET_LANGUAGES = [
+  { code: 'auto', name: 'auto', label: '✨ Auto-detect (Автоопределение)' },
+  { code: 'es', name: 'Spanish', label: '🇪🇸 Español (Spanish)' },
+  { code: 'en', name: 'English', label: '🇬🇧 English (English)' },
+  { code: 'de', name: 'German', label: '🇩🇪 Deutsch (German)' },
+  { code: 'fr', name: 'French', label: '🇫🇷 Français (French)' },
+  { code: 'it', name: 'Italian', label: '🇮🇹 Italiano (Italian)' },
+  { code: 'pt', name: 'Portuguese', label: '🇵🇹 Português (Portuguese)' },
+];
+
+export const L1_LANGUAGES = [
   { code: 'ru', name: 'Russian', label: 'Русский (Russian)' },
   { code: 'es', name: 'Spanish', label: 'Español (Spanish)' },
+  { code: 'en', name: 'English', label: 'English (English)' },
   { code: 'de', name: 'German', label: 'Deutsch (German)' },
   { code: 'fr', name: 'French', label: 'Français (French)' },
   { code: 'it', name: 'Italian', label: 'Italiano (Italian)' },
@@ -27,16 +39,18 @@ const L1_LANGUAGES = [
   { code: 'pt', name: 'Portuguese', label: 'Português (Portuguese)' },
 ];
 
-const SAMPLE_TEXT = `The relentless pace of technological advancement has created an ubiquitous reliance on automated algorithms. While proponents herald unprecedented efficiency, skeptics question the erosion of cognitive autonomy and the subtle ramifications of surveillance capitalism. Navigating this labyrinthine digital landscape demands profound intellectual discernment.`;
+const SAMPLE_TEXT_EN = `The relentless pace of technological advancement has created an ubiquitous reliance on automated algorithms. While proponents herald unprecedented efficiency, skeptics question the erosion of cognitive autonomy and the subtle ramifications of surveillance capitalism. Navigating this labyrinthine digital landscape demands profound intellectual discernment.`;
+
+const SAMPLE_TEXT_ES = `Tita no estaba conforme. Una gran cantidad de dudas salían a su mente. Por ejemplo, le agradaría saber si alguien consideró que en un perfecto plan para amparar a una figura familiar se debía pagar un precio tan alto. ¿Si Tita no podía casarse ni tener hijos al llegar a la senectud, quién se encargaría de atenderla? Tras el fallecimiento de su madre, ¿valía la pena continuar con aquella tradición opresiva?`;
 
 export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }) => {
   const { t, locale } = useTranslation();
-
   const [activeTab, setActiveTab] = useState<'text' | 'image'>('text');
   const [text, setText] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [imageMimeType, setImageMimeType] = useState<string>('image/jpeg');
+  const [imageMimeType, setImageMimeType] = useState<string>('image/png');
   const [imageFileName, setImageFileName] = useState<string | null>(null);
+  const [targetLanguage, setTargetLanguage] = useState<string>('auto');
   const [targetLevel, setTargetLevel] = useState<string>('B1');
   const [l1Language, setL1Language] = useState<string>('Russian');
   const [isDragging, setIsDragging] = useState(false);
@@ -46,7 +60,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
   // Default L1 based on UI locale
   useEffect(() => {
     if (locale === 'es') setL1Language('Spanish');
-    else if (locale === 'ru') setL1Language('Russian');
+    else if (locale === 'en') setL1Language('Russian');
     else setL1Language('Russian');
   }, [locale]);
 
@@ -73,14 +87,24 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
   }, [activeTab]);
 
   const handleFile = (file: File) => {
-    if (!file.type.startsWith('image/')) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file (PNG, JPG, WEBP).');
+      return;
+    }
+
+    if (file.size > 12 * 1024 * 1024) {
+      alert('File size exceeds 12 MB limit.');
+      return;
+    }
+
     setImageMimeType(file.type);
-    setImageFileName(file.name || 'Pasted Screenshot');
+    setImageFileName(file.name);
 
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      setImageBase64(result);
+      if (typeof reader.result === 'string') {
+        setImageBase64(reader.result);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -88,7 +112,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files?.[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
   };
@@ -98,7 +122,8 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
     setIsDragging(false);
   };
 
@@ -108,6 +133,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
       if (!text.trim()) return;
       onAnalyze({
         text: text.trim(),
+        targetLanguage,
         targetLevel,
         l1Language,
       });
@@ -116,6 +142,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
       onAnalyze({
         imageBase64,
         imageMimeType,
+        targetLanguage,
         targetLevel,
         l1Language,
       });
@@ -139,7 +166,6 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
         >
           📝 {t.reader.tabText}
         </button>
-
         <button
           type="button"
           onClick={() => setActiveTab('image')}
@@ -149,7 +175,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
               : 'border-transparent text-text-secondary hover:text-text-primary'
           }`}
         >
-          📷 {t.reader.tabImage}
+          📸 {t.reader.tabImage}
         </button>
       </div>
 
@@ -157,17 +183,34 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
         {/* Tab 1: Text Input */}
         {activeTab === 'text' && (
           <div>
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
               <label htmlFor="text-input" className="block text-xs font-semibold text-text-secondary">
                 {t.reader.tabText}
               </label>
-              <button
-                type="button"
-                onClick={() => setText(SAMPLE_TEXT)}
-                className="text-xs text-brand-600 hover:text-brand-800 underline cursor-pointer"
-              >
-                Insert sample text
-              </button>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-muted-foreground">Sample texts:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setText(SAMPLE_TEXT_ES);
+                    setTargetLanguage('Spanish');
+                  }}
+                  className="text-xs text-brand-600 hover:text-brand-800 underline cursor-pointer font-medium"
+                >
+                  🇪🇸 Spanish (B1)
+                </button>
+                <span className="text-neutral-300">|</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setText(SAMPLE_TEXT_EN);
+                    setTargetLanguage('English');
+                  }}
+                  className="text-xs text-brand-600 hover:text-brand-800 underline cursor-pointer font-medium"
+                >
+                  🇬🇧 English (B1)
+                </button>
+              </div>
             </div>
             <textarea
               id="text-input"
@@ -215,7 +258,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
                   {t.reader.dropImageSub}
                 </p>
                 <span className="inline-block px-4 py-1.5 rounded-lg bg-white border border-brand-200 text-xs font-medium text-brand-700 shadow-2xs">
-                  Tip: You can also press <kbd className="font-mono bg-neutral-100 px-1 rounded">Ctrl+V</kbd> / <kbd className="font-mono bg-neutral-100 px-1 rounded">Cmd+V</kbd> to paste a screenshot directly!
+                  Tip: Supports screenshots in <strong>Spanish, English, German, French, Italian</strong> and more! Press <kbd className="font-mono bg-neutral-100 px-1 rounded">Ctrl+V</kbd> to paste directly.
                 </span>
               </div>
             ) : (
@@ -233,11 +276,10 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
                       {imageFileName}
                     </p>
                     <p className="text-xs text-green-700 font-medium mt-0.5">
-                      ✓ Ready for OCR reading
+                      ✓ Ready for Multilingual OCR reading
                     </p>
                   </div>
                 </div>
-
                 <button
                   type="button"
                   onClick={() => {
@@ -253,13 +295,36 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
           </div>
         )}
 
-        {/* Level & L1 Settings Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-2 border-t border-brand-100">
+        {/* Target Language, Level & L1 Settings Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 pt-4 border-t border-brand-100">
+          {/* 1. Language of the text */}
+          <div>
+            <label htmlFor="target-lang-select" className="block text-xs font-semibold text-text-secondary mb-1.5">
+              Language of Text:
+            </label>
+            <select
+              id="target-lang-select"
+              value={targetLanguage}
+              onChange={(e) => setTargetLanguage(e.target.value)}
+              className="w-full p-2.5 border border-brand-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-text-primary"
+            >
+              {TARGET_LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.name}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Select or leave on Auto-detect
+            </p>
+          </div>
+
+          {/* 2. CEFR Level */}
           <div>
             <label className="block text-xs font-semibold text-text-secondary mb-1.5">
               {t.reader.levelLabel}
             </label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-5 gap-1">
               {CEFR_LEVELS.map((lvl) => (
                 <button
                   key={lvl}
@@ -275,11 +340,12 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
                 </button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground mt-1.5 leading-normal">
+            <p className="text-[11px] text-muted-foreground mt-1">
               {t.reader.levelHint}
             </p>
           </div>
 
+          {/* 3. L1 Native Language for translation */}
           <div>
             <label htmlFor="l1-select" className="block text-xs font-semibold text-text-secondary mb-1.5">
               {t.reader.l1Label}
@@ -296,6 +362,9 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
                 </option>
               ))}
             </select>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Translations rendered in this language
+            </p>
           </div>
         </div>
 

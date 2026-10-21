@@ -54,6 +54,7 @@ export default function SmartReaderPage() {
     text?: string;
     imageBase64?: string;
     imageMimeType?: string;
+    targetLanguage?: string;
     targetLevel: string;
     l1Language: string;
   }) => {

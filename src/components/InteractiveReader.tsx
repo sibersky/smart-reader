@@ -47,12 +47,23 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
     return wordIdx === userIdx + 1;
   };
 
+    const getSpeechLang = (lang?: string): string => {
+    const l = (lang || data.detectedLanguage || "").toLowerCase();
+    if (l.includes("spanish") || l.includes("es")) return "es-ES";
+    if (l.includes("german") || l.includes("de")) return "de-DE";
+    if (l.includes("french") || l.includes("fr")) return "fr-FR";
+    if (l.includes("italian") || l.includes("it")) return "it-IT";
+    if (l.includes("portuguese") || l.includes("pt")) return "pt-PT";
+    if (l.includes("russian") || l.includes("ru")) return "ru-RU";
+    return "en-US";
+  };
+
   // Pronounce word using browser Web Speech API
   const handleSpeak = (text: string) => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
+      utterance.lang = getSpeechLang();
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
     }
@@ -189,6 +200,12 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
           >
             ← {t.reader.controls.newText}
           </button>
+
+          {data.detectedLanguage && (
+            <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-50 border border-brand-200 text-brand-800 text-xs font-bold">
+              🌍 {data.detectedLanguage} · {targetLevel}
+            </span>
+          )}
 
           <div className="flex rounded-lg border border-brand-200 p-0.5 bg-neutral-50 text-xs font-medium">
             <button
