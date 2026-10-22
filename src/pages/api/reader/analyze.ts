@@ -16,8 +16,9 @@ export interface WordAnnotation {
   lemma: string;
   cefrLevel: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
   partOfSpeech: string;
-  definitionEn: string;
-  translationL1: string;
+  definition: string; // Definition in the TARGET language (e.g. Spanish for Spanish text, English for English text)
+  definitionEn?: string; // backwards compatibility alias
+  translationL1: string; // Translation in student's native language (e.g. Russian)
 }
 
 export interface AnalyzeResult {
@@ -39,11 +40,9 @@ function safeExtractJSON(raw: string): AnalyzeResult {
     throw new Error('AI engine returned an empty text response.');
   }
 
-  // 1. Direct parse attempt
   try {
     return JSON.parse(raw.trim());
   } catch {
-    // 2. Remove markdown code blocks
     const stripped = raw
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
@@ -52,7 +51,6 @@ function safeExtractJSON(raw: string): AnalyzeResult {
     try {
       return JSON.parse(stripped);
     } catch {
-      // 3. Extract JSON object via regex matching outermost braces
       const match = raw.match(/\{[\s\S]*\}/);
       if (match) {
         return JSON.parse(match[0]);
@@ -76,7 +74,7 @@ export default async function handler(
       text,
       imageBase64,
       imageMimeType = 'image/png',
-      targetLanguage = 'auto', // "Spanish", "English", "auto", "German", etc.
+      targetLanguage = 'auto',
       targetLevel = 'B1',
       l1Language = 'Russian',
     } = req.body;
@@ -88,53 +86,65 @@ export default async function handler(
       });
     }
 
-    const languageInstruction =
+    const langInstruction =
       targetLanguage && targetLanguage !== 'auto'
         ? `The target language of the text is ${targetLanguage}.`
         : `Automatically detect the language of the text (e.g. Spanish, English, German, French, etc.).`;
 
-    const promptInstructions = `You are an expert multilingual lexicographer and CEFR language educator.
-${languageInstruction}
-The user is a language learner at CEFR level ${targetLevel}.
-The user's native language for translations and explanations (L1) is ${l1Language}.
+    const promptInstructions = `You are a certified lexicographer and CEFR language educator.
+${langInstruction}
+The user is a language learner currently at CEFR level ${targetLevel}.
+The user's native language for translations (L1) is ${l1Language}.
 
-Tasks:
-1. If an image is provided, perform high-precision OCR to extract the original text cleanly in its original source language, preserving paragraph breaks. If text is provided, use that text.
-2. Detect and state the language of the text (e.g. "Spanish", "English", "German", "French").
-3. Analyze all vocabulary in the text according to standard CEFR scale for that language (A1, A2, B1, B2, C1, C2).
-4. Identify all words, idioms, or expressions that are ABOVE the student's mastery level (${targetLevel}):
-   - If user is A1: highlight A2, B1, B2, C1, C2
-   - If user is A2: highlight B1, B2, C1, C2
-   - If user is B1: highlight B2, C1, C2 (borderline B2, advanced C1/C2)
-   - If user is B2: highlight C1, C2
-   - If user is C1: highlight C2 and rare idiomatic expressions
-5. For each above-level word or expression:
-   - "token": exact string as it appears in the text (e.g. "senectud")
-   - "lemma": dictionary base form (e.g. "senectud")
-   - "cefrLevel": assigned CEFR level ('A1', 'A2', 'B1', 'B2', 'C1', 'C2')
-   - "partOfSpeech": e.g. "verb", "noun", "adj.", "idiom"
-   - "definitionEn": concise, crystal-clear definition (in simple English or simple target language matching this exact context)
-   - "translationL1": natural, accurate contextual translation into ${l1Language} (e.g. Russian)
-6. Statistics:
-   - "totalWords": total word count of the extracted text
-   - "aboveLevelCount": count of identified above-level items
-   - "percentKnown": approximate percentage of known words (Math.round(((totalWords - aboveLevelCount) / totalWords) * 100))
+===========================
+PEDAGOGICAL CEFR CALIBRATION RULES (CRITICAL):
+===========================
+1. Be sensitive and thorough. Do NOT underestimate vocabulary difficulty.
+2. In official CEFR guidelines (including Plan Curricular del Instituto Cervantes - PCIC for Spanish, Cambridge for English, Goethe for German):
+   - A1/A2 is STRICTLY limited to elementary survival vocabulary (e.g. basic pronouns, numbers, concrete physical objects, elementary verbs like ir, comer, ver, hablar, tener, ser, estar, querer, hacer).
+   - B1 (Threshold) includes intermediate cognitive, communicative, reporting, opinion, and subjunctive verbs and abstract nouns.
+     * Examples in Spanish: "sugerir", "admitir", "advertir", "afirmar", "asegurar", "rechazar", "exigir", "convencer", "reconocer", "desarrollar", "establecer", "conseguir", "proponer", "plantear", "comprobar", "impedir", "evitar", "suponer", "pretender", "lograr", "apreciar", "destacar", "complejo".
+     * Therefore, for an A2 student, words like "sugerir" (B1) and "admitir" (B1/B2) ARE ABOVE LEVEL and MUST BE HIGHLIGHTED!
+   - B2 (Vantage) includes nuanced discourse connectors, formal terms, idioms, abstract concepts:
+     * Examples: "desempeñar", "abarcar", "prescindir", "suscitar", "constatar", "imprescindible", "paulatino", "a raíz de".
+   - C1/C2 (Proficient) includes literary, specialized, and advanced vocabulary:
+     * Examples: "senectud", "amparar", "soslayar", "vislumbrar", "fidedigno", "desmoronar".
+3. HIGHLIGHTING RULE:
+   - Identify and annotate ALL words, idioms, or expressions that are ABOVE the user's level (${targetLevel}).
+   - If user is A1: highlight A2, B1, B2, C1, C2.
+   - If user is A2: highlight B1, B2, C1, C2 (Make sure words like "sugerir", "admitir", "desarrollar" are flagged as B1/B2).
+   - If user is B1: highlight B2, C1, C2.
+   - If user is B2: highlight C1, C2.
+   - If user is C1: highlight C2 and rare idioms.
 
-Return ONLY a valid JSON object matching this schema:
+===========================
+LANGUAGE OF DEFINITION & TRANSLATION (CRITICAL):
+===========================
+1. "definition": MUST BE WRITTEN IN THE TARGET LANGUAGE OF THE TEXT!
+   - If the text is Spanish, the definition MUST be in clear, accessible SPANISH (e.g., for "sugerir": "Proponer o recomendar una idea a alguien para que la considere."). NEVER write definitions in English for Spanish texts!
+   - If the text is English, the definition MUST be in English.
+   - If the text is German, the definition MUST be in German.
+   - If the text is French, the definition MUST be in French.
+2. "translationL1": MUST be written in the student's native language (${l1Language}, e.g. Russian: for "sugerir" -> "предлагать, советовать").
+
+===========================
+OUTPUT SCHEMA (STRICT JSON ONLY):
+===========================
 {
   "detectedLanguage": "Spanish",
-  "extractedText": "...",
+  "extractedText": "exact full text of the article or excerpt",
   "totalWords": 0,
   "aboveLevelCount": 0,
   "percentKnown": 0,
   "annotations": [
     {
-      "token": "...",
-      "lemma": "...",
-      "cefrLevel": "B2",
-      "partOfSpeech": "...",
-      "definitionEn": "...",
-      "translationL1": "..."
+      "token": "sugerir",
+      "lemma": "sugerir",
+      "cefrLevel": "B1",
+      "partOfSpeech": "verbo",
+      "definition": "Proponer o aconsejar una idea o plan para que alguien lo considere.",
+      "definitionEn": "Proponer o aconsejar una idea o plan para que alguien lo considere.",
+      "translationL1": "предлагать, советовать"
     }
   ]
 }`;
@@ -180,30 +190,34 @@ Return ONLY a valid JSON object matching this schema:
         text: promptInstructions,
       });
 
-      // Retry loop for temporary 503 high demand or network hiccups
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: { parts: contentsParts } as unknown as string,
-            config: {
-              responseMimeType: 'application/json',
-              temperature: 0.2,
-            },
-          });
+      // Try gemini models with retry
+      const models = ['gemini-3.8-flash', 'gemini-flash-latest'];
+      for (const m of models) {
+        if (parsedResult) break;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            console.log(`[Gemini] model=${m} attempt=${attempt}`);
+            const response = await ai.models.generateContent({
+              model: m,
+              contents: { parts: contentsParts } as unknown as string,
+              config: {
+                responseMimeType: 'application/json',
+                temperature: 0.15,
+              },
+            });
 
-          const raw = response.text;
-          if (raw && raw.trim()) {
-            parsedResult = safeExtractJSON(raw);
-            break;
-          }
-        } catch (e: unknown) {
-          const err = e as Error;
-          console.warn(`[Gemini attempt ${attempt}/3] error:`, err?.message || e);
-          lastError = err;
-          if (attempt < 3) {
-            // Wait 1.2s before retry
-            await new Promise((r) => setTimeout(r, 1200));
+            const raw = response.text;
+            if (raw && raw.trim()) {
+              parsedResult = safeExtractJSON(raw);
+              break;
+            }
+          } catch (e: unknown) {
+            const err = e as Error;
+            console.warn(`[Gemini ${m} attempt ${attempt}/3] error:`, err?.message || e);
+            lastError = err;
+            if (attempt < 3) {
+              await new Promise((r) => setTimeout(r, 1200));
+            }
           }
         }
       }
@@ -250,7 +264,7 @@ Return ONLY a valid JSON object matching this schema:
           model: 'gpt-4o-mini',
           messages,
           response_format: { type: 'json_object' },
-          temperature: 0.2,
+          temperature: 0.15,
         });
 
         const raw = completion.choices[0]?.message?.content?.trim();
@@ -285,7 +299,7 @@ Return ONLY a valid JSON object matching this schema:
               content: `${promptInstructions}\n\nSource text:\n${text}`,
             },
           ],
-          temperature: 0.2,
+          temperature: 0.15,
         });
 
         const raw = completion.choices[0]?.message?.content?.trim();
@@ -308,10 +322,17 @@ Return ONLY a valid JSON object matching this schema:
       );
     }
 
-    // Sanitize results
+    // Sanitize and ensure definition and definitionEn are always synchronized
     parsedResult.extractedText = parsedResult.extractedText || text || '';
     parsedResult.annotations = Array.isArray(parsedResult.annotations)
-      ? parsedResult.annotations
+      ? parsedResult.annotations.map((ann) => {
+          const def = ann.definition || ann.definitionEn || '';
+          return {
+            ...ann,
+            definition: def,
+            definitionEn: def,
+          };
+        })
       : [];
     parsedResult.totalWords =
       parsedResult.totalWords || parsedResult.extractedText.split(/\s+/).filter(Boolean).length || 1;

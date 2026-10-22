@@ -79,7 +79,7 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
 
   // Copy word as flashcard: "word — translation"
   const handleCopyFlashcard = async (item: WordAnnotation) => {
-    const text = `${item.lemma || item.token} — ${item.translationL1} // ${item.definitionEn} (${item.cefrLevel})`;
+    const text = `${item.lemma || item.token} — ${item.translationL1} // ${(item.definition || item.definitionEn)} (${item.cefrLevel})`;
     try {
       await navigator.clipboard.writeText(text);
       setCopiedWord(item.token);
@@ -97,7 +97,7 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
       const list = raw ? JSON.parse(raw) : [];
       const newCard = {
         front: item.lemma || item.token,
-        back: `${item.translationL1}\n(${item.definitionEn})`,
+        back: `${item.translationL1}\n(${(item.definition || item.definitionEn)})`,
         cefrLevel: item.cefrLevel,
         partOfSpeech: item.partOfSpeech,
         savedAt: new Date().toISOString(),
@@ -127,7 +127,7 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
   // Export all vocabulary as .txt file
   const handleExportAll = () => {
     const lines = data.annotations.map(
-      (item) => `${item.lemma || item.token} — ${item.translationL1} // [${item.cefrLevel} ${item.partOfSpeech}] ${item.definitionEn}`
+      (item) => `${item.lemma || item.token} — ${item.translationL1} // [${item.cefrLevel} ${item.partOfSpeech}] ${(item.definition || item.definitionEn)}`
     );
     const content = `Smart Reader Vocabulary Export (${targetLevel} -> L1: ${l1Language})\nDate: ${new Date().toLocaleDateString()}\nTotal Words: ${data.totalWords} | Above Level: ${data.aboveLevelCount}\n\n` + lines.join('\n');
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -419,7 +419,7 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-text-primary leading-relaxed">
-                    {item.definitionEn}
+                    {(item.definition || item.definitionEn)}
                   </p>
                   <p className="text-xs font-semibold text-brand-700">
                     L1 ({l1Language}): {item.translationL1}
@@ -507,10 +507,10 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
             <div className="py-4 space-y-3">
               <div>
                 <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider block mb-1">
-                  {t.reader.popover.definition}
+                  {t.reader.popover.definition} ({data.detectedLanguage || "Target Language"})
                 </label>
                 <p className="text-sm text-neutral-800 leading-relaxed bg-brand-50/50 p-3 rounded-xl border border-brand-100">
-                  {selectedWord.definitionEn}
+                  {(selectedWord.definition || selectedWord.definitionEn)}
                 </p>
               </div>
 
