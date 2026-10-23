@@ -35,6 +35,36 @@ type ApiResponse =
   | { success: false; error: string; details?: string };
 
 // Helper to safely extract and parse JSON from LLM output
+function sanitizeErrorMessage(err: Error | null): { errorCode: string; userMessage: string } {
+  const raw = (err?.message || "").toString();
+  if (
+    raw.includes("429") ||
+    raw.includes("quota") ||
+    raw.includes("RESOURCE_EXHAUSTED") ||
+    raw.includes("rate-limit") ||
+    raw.includes("limit: 5")
+  ) {
+    return {
+      errorCode: "RATE_LIMIT",
+      userMessage: "The language engine is temporarily busy. Please wait 15–20 seconds and try again.",
+    };
+  }
+  if (
+    raw.includes("503") ||
+    raw.includes("UNAVAILABLE") ||
+    raw.includes("high demand")
+  ) {
+    return {
+      errorCode: "HIGH_DEMAND",
+      userMessage: "The service is experiencing temporary high demand. Please try again in a few moments.",
+    };
+  }
+  return {
+    errorCode: "SERVER_BUSY",
+    userMessage: "Could not complete text analysis at this moment. Please try again.",
+  };
+}
+
 function safeExtractJSON(raw: string): AnalyzeResult {
   if (!raw || !raw.trim()) {
     throw new Error('AI engine returned an empty text response.');
@@ -356,11 +386,13 @@ OUTPUT SCHEMA (STRICT JSON ONLY):
     });
   } catch (err: unknown) {
     const error = err as Error;
-    console.error('[API /api/reader/analyze] Error:', error);
-    return res.status(500).json({
+    console.error('[API /api/reader/analyze] Error:', error?.message || error);
+    const { errorCode, userMessage } = sanitizeErrorMessage(error);
+    const statusCode = errorCode === 'RATE_LIMIT' ? 429 : 500;
+    return res.status(statusCode).json({
       success: false,
-      error: 'Failed to analyze text',
-      details: error?.message || 'An unexpected error occurred during linguistic analysis.',
+      error: userMessage,
+      details: userMessage,
     });
   }
 }

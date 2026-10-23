@@ -1,5 +1,5 @@
 // src/pages/index.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import { useTranslation } from '@/lib/i18n';
 import { AuthGate } from '@/components/AuthGate';
@@ -8,7 +8,7 @@ import { InteractiveReader } from '@/components/InteractiveReader';
 import { AnalyzeResult } from './api/reader/analyze';
 
 export default function SmartReaderPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const accountAppUrl =
     process.env.NEXT_PUBLIC_ACCOUNT_HUB_URL || 'https://account.teacher-alex.com';
 
@@ -22,6 +22,14 @@ export default function SmartReaderPage() {
   const [currentLevel, setCurrentLevel] = useState<string>('B1');
   const [currentL1, setCurrentL1] = useState<string>('Russian');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const lastPayloadRef = useRef<{
+    text?: string;
+    imageBase64?: string;
+    imageMimeType?: string;
+    targetLanguage?: string;
+    targetLevel: string;
+    l1Language: string;
+  } | null>(null);
 
   // SSO Session check
   useEffect(() => {
@@ -60,6 +68,7 @@ export default function SmartReaderPage() {
   }) => {
     setIsAnalyzing(true);
     setErrorMessage(null);
+    lastPayloadRef.current = payload;
     setCurrentLevel(payload.targetLevel);
     setCurrentL1(payload.l1Language);
 
@@ -85,6 +94,52 @@ export default function SmartReaderPage() {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+    // User-friendly error message formatter (hides technical JSON, stack traces, and 429 quota dumps)
+  const getFriendlyError = (raw: string | null): string => {
+    if (!raw) return "";
+    const s = raw.toLowerCase();
+    if (
+      s.includes("429") ||
+      s.includes("quota") ||
+      s.includes("resource_exhausted") ||
+      s.includes("rate_limit") ||
+      s.includes("rate-limit") ||
+      s.includes("limit: 5") ||
+      s.includes("temporarily busy")
+    ) {
+      if (locale === "ru") {
+        return "Сервер временно перегружен запросами. Пожалуйста, подождите 15–20 секунд и нажмите «Попробовать снова».";
+      }
+      if (locale === "es") {
+        return "El servicio de IA está temporalmente ocupado. Por favor, espere unos segundos y pulse «Reintentar».";
+      }
+      return "The AI engine is temporarily busy. Please wait 15–20 seconds and tap \"Try Again\".";
+    }
+
+    if (s.includes("unauthorized") || s.includes("401")) {
+      if (locale === "ru") {
+        return "Для продолжения работы, пожалуйста, войдите в свой аккаунт Teacher Alex.";
+      }
+      if (locale === "es") {
+        return "Para continuar, inicie sesión en su cuenta de Teacher Alex.";
+      }
+      return "Please sign in to your Teacher Alex account to continue.";
+    }
+
+    // Hide raw JSON dumps or URLs completely
+    if (raw.trim().startsWith("{") || raw.includes("googleapis") || raw.includes("http") || raw.length > 120) {
+      if (locale === "ru") {
+        return "Временная задержка при обработке текста. Пожалуйста, попробуйте еще раз.";
+      }
+      if (locale === "es") {
+        return "Demora temporal al procesar el texto. Por favor, inténtelo de nuevo.";
+      }
+      return "Could not process the text at this moment. Please try again.";
+    }
+
+    return raw;
   };
 
   const handleReset = () => {
@@ -145,20 +200,41 @@ export default function SmartReaderPage() {
                   </p>
                 </div>
 
-                {/* Error Banner if any */}
+                {/* User-Friendly Error Banner */}
                 {errorMessage && (
-                  <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center justify-between mb-4">
-                    <div>
-                      <strong className="font-bold">{t.reader.errorTitle}: </strong>
-                      <span>{errorMessage}</span>
+                  <div className="p-4 rounded-2xl bg-amber-50/95 border border-amber-200 text-amber-950 text-xs shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 animate-in fade-in duration-200">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-base select-none leading-none mt-0.5">⏳</span>
+                      <div>
+                        <p className="font-semibold text-xs leading-relaxed">
+                          {getFriendlyError(errorMessage)}
+                        </p>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setErrorMessage(null)}
-                      className="ml-4 font-bold hover:underline cursor-pointer"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      {lastPayloadRef.current && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (lastPayloadRef.current) {
+                              handleAnalyze(lastPayloadRef.current);
+                            }
+                          }}
+                          disabled={isAnalyzing}
+                          className="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs cursor-pointer transition-colors shadow-2xs disabled:opacity-50"
+                        >
+                          {isAnalyzing ? "..." : (locale === "ru" ? "Попробовать снова" : locale === "es" ? "Reintentar" : "Try Again")}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setErrorMessage(null)}
+                        className="p-1.5 rounded-lg text-amber-800 hover:bg-amber-100/80 cursor-pointer font-bold transition-colors"
+                        title="Dismiss"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 )}
 
