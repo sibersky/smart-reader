@@ -89,38 +89,107 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
     }
   };
 
-  // Save word to Poke-Me-On deck (localStorage + sync)
-  const handleSaveToPokeMeOn = (item: WordAnnotation) => {
+    // Save word to Poke-Me-On deck (PostgreSQL DB + localStorage cache)
+  const handleSaveToPokeMeOn = async (item: WordAnnotation) => {
+    const frontText = (item.lemma || item.token).trim();
+    const def = (item.definition || item.definitionEn || "").trim();
+    const backText = `${item.translationL1}\n(${def})`.trim();
+    const contentLine = `${frontText} — ${item.translationL1} // [${item.cefrLevel}] ${def}`;
+
     try {
-      const storageKey = 'teacher_alex_saved_flashcards';
+      // 1. Cache in browser localStorage
+      const storageKey = "teacher_alex_saved_flashcards";
       const raw = localStorage.getItem(storageKey);
       const list = raw ? JSON.parse(raw) : [];
-      const newCard = {
-        front: item.lemma || item.token,
-        back: `${item.translationL1}\n(${(item.definition || item.definitionEn)})`,
+      list.push({
+        front: frontText,
+        back: backText,
         cefrLevel: item.cefrLevel,
         partOfSpeech: item.partOfSpeech,
         savedAt: new Date().toISOString(),
-      };
-      list.push(newCard);
+      });
       localStorage.setItem(storageKey, JSON.stringify(list));
 
-      // Attempt to save to Poke-Me-On API if logged in
-      fetch('/poke_me_on/api/items', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+      // 2. Persist directly to Poke-Me-On API with credentials
+      const res = await fetch("/poke_me_on/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
-          front: newCard.front,
-          back: newCard.back,
+          front: frontText,
+          back: backText,
+          content: contentLine,
+          source: "Smart Reader",
         }),
-      }).catch(() => {
-        // Fallback silently to localStorage
       });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          alert("Для сохранения слов в Poke-Me-On необходимо войти в аккаунт Teacher Alex.\n\nTo save cards to Poke-Me-On, please log in to Teacher Alex.");
+          return;
+        }
+        const err = await res.json().catch(() => ({}));
+        console.warn("Poke-Me-On sync response:", err);
+      } else {
+        console.log("Successfully saved to Poke-Me-On deck:", frontText);
+      }
 
       setSavedWords((prev) => ({ ...prev, [item.token]: true }));
     } catch (e) {
-      console.warn('Failed to save to local storage', e);
+      console.warn("Failed to save to Poke-Me-On", e);
+    }
+  };
+
+  // Bulk save all annotations to Poke-Me-On deck
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const handleSyncAllToPokeMeOn = async () => {
+    if (!data.annotations || data.annotations.length === 0) return;
+    setIsSyncingAll(true);
+    try {
+      const items = data.annotations.map((item) => {
+        const frontText = (item.lemma || item.token).trim();
+        const def = (item.definition || item.definitionEn || "").trim();
+        return {
+          front: frontText,
+          back: `${item.translationL1}\n(${def})`.trim(),
+        };
+      });
+
+      const contentLines = data.annotations.map((item) => {
+        const frontText = (item.lemma || item.token).trim();
+        const def = (item.definition || item.definitionEn || "").trim();
+        return `${frontText} — ${item.translationL1} // [${item.cefrLevel}] ${def}`;
+      }).join("\n");
+
+      const res = await fetch("/poke_me_on/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          items,
+          content: contentLines,
+          source: "Smart Reader",
+        }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          alert("Для сохранения слов в Poke-Me-On войдите в аккаунт Teacher Alex.\n\nPlease log in to Teacher Alex to save words to your Poke-Me-On deck.");
+          return;
+        }
+        alert("Could not sync with Poke-Me-On. Status: " + res.status);
+      } else {
+        const result = await res.json().catch(() => ({}));
+        const count = result.count || items.length;
+        alert(`Успешно добавлено в Poke-Me-On: ${count} слов!\nSuccessfully added ${count} words to Poke-Me-On!`);
+        const newSaved: Record<string, boolean> = {};
+        data.annotations.forEach(it => { newSaved[it.token] = true; });
+        setSavedWords(prev => ({ ...prev, ...newSaved }));
+      }
+    } catch (e) {
+      console.error("Bulk sync error:", e);
+    } finally {
+      setIsSyncingAll(false);
     }
   };
 
@@ -291,6 +360,17 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
 
           <button
             type="button"
+            onClick={handleSyncAllToPokeMeOn}
+            disabled={isSyncingAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+            title="Save all highlighted words directly into your Poke-Me-On deck"
+          >
+            <span>🔔</span>
+            <span>{isSyncingAll ? "Синхронизация..." : "+ Poke-Me-On (Все слова)"}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportAll}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-50 border border-brand-200 text-brand-800 hover:bg-brand-100 transition-colors cursor-pointer"
           >
@@ -378,13 +458,23 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
             <h3 className="font-bold text-sm text-brand-900">
               Vocabulary Detected Above Level {targetLevel} ({data.annotations.length} items)
             </h3>
-            <button
-              type="button"
-              onClick={handleExportAll}
-              className="text-xs font-semibold text-brand-700 hover:text-brand-900 cursor-pointer"
-            >
-              📥 Download List (.txt)
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSyncAllToPokeMeOn}
+                disabled={isSyncingAll}
+                className="text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+              >
+                🔔 {isSyncingAll ? "Синхронизация..." : "+ Poke-Me-On (Все)"}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportAll}
+                className="text-xs font-semibold text-brand-700 hover:text-brand-900 cursor-pointer"
+              >
+                📥 Download List (.txt)
+              </button>
+            </div>
           </div>
           <div className="divide-y divide-brand-100">
             {data.annotations.map((item, idx) => (
