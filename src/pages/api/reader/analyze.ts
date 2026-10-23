@@ -16,9 +16,9 @@ export interface WordAnnotation {
   lemma: string;
   cefrLevel: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
   partOfSpeech: string;
-  definition: string; // Definition in the TARGET language (e.g. Spanish for Spanish text, English for English text)
-  definitionEn?: string; // backwards compatibility alias
-  translationL1: string; // Translation in student's native language (e.g. Russian)
+  definition: string;
+  definitionEn?: string;
+  translationL1: string;
 }
 
 export interface AnalyzeResult {
@@ -34,34 +34,33 @@ type ApiResponse =
   | { success: true; data: AnalyzeResult }
   | { success: false; error: string; details?: string };
 
-// Helper to safely extract and parse JSON from LLM output
 function sanitizeErrorMessage(err: Error | null): { errorCode: string; userMessage: string } {
-  const raw = (err?.message || "").toString();
+  const raw = (err?.message || '').toString();
   if (
-    raw.includes("429") ||
-    raw.includes("quota") ||
-    raw.includes("RESOURCE_EXHAUSTED") ||
-    raw.includes("rate-limit") ||
-    raw.includes("limit: 5")
+    raw.includes('429') ||
+    raw.includes('quota') ||
+    raw.includes('RESOURCE_EXHAUSTED') ||
+    raw.includes('rate-limit') ||
+    raw.includes('limit: 5')
   ) {
     return {
-      errorCode: "RATE_LIMIT",
-      userMessage: "The language engine is temporarily busy. Please wait 15–20 seconds and try again.",
+      errorCode: 'RATE_LIMIT',
+      userMessage: 'The language engine is temporarily busy. Please wait 15–20 seconds and try again.',
     };
   }
   if (
-    raw.includes("503") ||
-    raw.includes("UNAVAILABLE") ||
-    raw.includes("high demand")
+    raw.includes('503') ||
+    raw.includes('UNAVAILABLE') ||
+    raw.includes('high demand')
   ) {
     return {
-      errorCode: "HIGH_DEMAND",
-      userMessage: "The service is experiencing temporary high demand. Please try again in a few moments.",
+      errorCode: 'HIGH_DEMAND',
+      userMessage: 'The service is experiencing temporary high demand. Please try again in a few moments.',
     };
   }
   return {
-    errorCode: "SERVER_BUSY",
-    userMessage: "Could not complete text analysis at this moment. Please try again.",
+    errorCode: 'SERVER_BUSY',
+    userMessage: 'Could not complete text analysis at this moment. Please try again.',
   };
 }
 
@@ -123,58 +122,39 @@ export default async function handler(
 
     const promptInstructions = `You are a certified lexicographer and CEFR language educator.
 ${langInstruction}
-The user is a language learner currently at CEFR level ${targetLevel}.
-The user's native language for translations (L1) is ${l1Language}.
+The user is a language learner at CEFR level ${targetLevel}.
+Native language for translations (L1): ${l1Language}.
 
-===========================
-PEDAGOGICAL CEFR CALIBRATION RULES (CRITICAL):
-===========================
-1. Be sensitive and thorough. Do NOT underestimate vocabulary difficulty.
-2. In official CEFR guidelines (including Plan Curricular del Instituto Cervantes - PCIC for Spanish, Cambridge for English, Goethe for German):
-   - A1/A2 is STRICTLY limited to elementary survival vocabulary (e.g. basic pronouns, numbers, concrete physical objects, elementary verbs like ir, comer, ver, hablar, tener, ser, estar, querer, hacer).
-   - B1 (Threshold) includes intermediate cognitive, communicative, reporting, opinion, and subjunctive verbs and abstract nouns.
-     * Examples in Spanish: "sugerir", "admitir", "advertir", "afirmar", "asegurar", "rechazar", "exigir", "convencer", "reconocer", "desarrollar", "establecer", "conseguir", "proponer", "plantear", "comprobar", "impedir", "evitar", "suponer", "pretender", "lograr", "apreciar", "destacar", "complejo".
-     * Therefore, for an A2 student, words like "sugerir" (B1) and "admitir" (B1/B2) ARE ABOVE LEVEL and MUST BE HIGHLIGHTED!
-   - B2 (Vantage) includes nuanced discourse connectors, formal terms, idioms, abstract concepts:
-     * Examples: "desempeñar", "abarcar", "prescindir", "suscitar", "constatar", "imprescindible", "paulatino", "a raíz de".
-   - C1/C2 (Proficient) includes literary, specialized, and advanced vocabulary:
-     * Examples: "senectud", "amparar", "soslayar", "vislumbrar", "fidedigno", "desmoronar".
-3. HIGHLIGHTING RULE:
-   - Identify and annotate ALL words, idioms, or expressions that are ABOVE the user's level (${targetLevel}).
-   - If user is A1: highlight A2, B1, B2, C1, C2.
-   - If user is A2: highlight B1, B2, C1, C2 (Make sure words like "sugerir", "admitir", "desarrollar" are flagged as B1/B2).
-   - If user is B1: highlight B2, C1, C2.
-   - If user is B2: highlight C1, C2.
-   - If user is C1: highlight C2 and rare idioms.
+Tasks:
+1. If an image is provided, perform OCR to extract the original text cleanly in its source language. If text is provided, use that text.
+2. Detect language (e.g. "Spanish", "English", "French").
+3. Identify all vocabulary, idioms, or expressions that are ABOVE level ${targetLevel} (e.g. for A2, highlight B1, B2, C1, C2; for B1, highlight B2, C1, C2).
+4. Annotate unique above-level items (maximum 30 most relevant items):
+   - "token": exact string as it appears in the text
+   - "lemma": base dictionary form
+   - "cefrLevel": 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'
+   - "partOfSpeech": e.g. "verb", "noun", "adj.", "idiom"
+   - "definition": concise 1-sentence definition (under 15 words) in the TARGET LANGUAGE of the text (in Spanish for Spanish text, in English for English text, etc.).
+   - "definitionEn": same definition in the target language.
+   - "translationL1": natural contextual translation into ${l1Language}.
+5. Calculate statistics: totalWords, aboveLevelCount, percentKnown.
 
-===========================
-LANGUAGE OF DEFINITION & TRANSLATION (CRITICAL):
-===========================
-1. "definition": MUST BE WRITTEN IN THE TARGET LANGUAGE OF THE TEXT!
-   - If the text is Spanish, the definition MUST be in clear, accessible SPANISH (e.g., for "sugerir": "Proponer o recomendar una idea a alguien para que la considere."). NEVER write definitions in English for Spanish texts!
-   - If the text is English, the definition MUST be in English.
-   - If the text is German, the definition MUST be in German.
-   - If the text is French, the definition MUST be in French.
-2. "translationL1": MUST be written in the student's native language (${l1Language}, e.g. Russian: for "sugerir" -> "предлагать, советовать").
-
-===========================
-OUTPUT SCHEMA (STRICT JSON ONLY):
-===========================
+Return strict JSON only matching this format:
 {
-  "detectedLanguage": "Spanish",
-  "extractedText": "exact full text of the article or excerpt",
+  "detectedLanguage": "English",
+  "extractedText": "...",
   "totalWords": 0,
   "aboveLevelCount": 0,
   "percentKnown": 0,
   "annotations": [
     {
-      "token": "sugerir",
-      "lemma": "sugerir",
+      "token": "...",
+      "lemma": "...",
       "cefrLevel": "B1",
-      "partOfSpeech": "verbo",
-      "definition": "Proponer o aconsejar una idea o plan para que alguien lo considere.",
-      "definitionEn": "Proponer o aconsejar una idea o plan para que alguien lo considere.",
-      "translationL1": "предлагать, советовать"
+      "partOfSpeech": "...",
+      "definition": "...",
+      "definitionEn": "...",
+      "translationL1": "..."
     }
   ]
 }`;
@@ -186,74 +166,62 @@ OUTPUT SCHEMA (STRICT JSON ONLY):
     let parsedResult: AnalyzeResult | null = null;
     let lastError: Error | null = null;
 
-    // 1. Google Gemini via @google/genai (Primary Engine)
+    // 1. Google Gemini via @google/genai (Single fast attempt)
     if (geminiKey) {
-      console.log('🤖 Attempting analysis with Google Gemini (gemini-3.8-flash)...');
-      const ai = new GoogleGenAI({
-        apiKey: geminiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
-
-      const contentsParts: Array<Record<string, unknown>> = [];
-
-      if (imageBase64) {
-        const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
-        contentsParts.push({
-          inlineData: {
-            mimeType: imageMimeType || 'image/png',
-            data: cleanBase64,
+      console.log('🤖 Calling Google Gemini (gemini-3.8-flash)...');
+      try {
+        const ai = new GoogleGenAI({
+          apiKey: geminiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
           },
         });
-      }
 
-      if (text) {
-        contentsParts.push({
-          text: `Source text to read:\n\n${text}`,
-        });
-      }
+        const contentsParts: Array<Record<string, unknown>> = [];
 
-      contentsParts.push({
-        text: promptInstructions,
-      });
-
-      // Try gemini models with retry
-      const models = ['gemini-3.8-flash', 'gemini-flash-latest'];
-      for (const m of models) {
-        if (parsedResult) break;
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            console.log(`[Gemini] model=${m} attempt=${attempt}`);
-            const response = await ai.models.generateContent({
-              model: m,
-              contents: { parts: contentsParts } as unknown as string,
-              config: {
-                responseMimeType: 'application/json',
-                temperature: 0.15,
-              },
-            });
-
-            const raw = response.text;
-            if (raw && raw.trim()) {
-              parsedResult = safeExtractJSON(raw);
-              break;
-            }
-          } catch (e: unknown) {
-            const err = e as Error;
-            console.warn(`[Gemini ${m} attempt ${attempt}/3] error:`, err?.message || e);
-            lastError = err;
-            if (attempt < 3) {
-              await new Promise((r) => setTimeout(r, 1200));
-            }
-          }
+        if (imageBase64) {
+          const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
+          contentsParts.push({
+            inlineData: {
+              mimeType: imageMimeType || 'image/png',
+              data: cleanBase64,
+            },
+          });
         }
+
+        if (text) {
+          contentsParts.push({
+            text: `Source text to read:\n\n${text}`,
+          });
+        }
+
+        contentsParts.push({
+          text: promptInstructions,
+        });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: { parts: contentsParts } as unknown as string,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.15,
+          },
+        });
+
+        const raw = response.text;
+        if (raw && raw.trim()) {
+          parsedResult = safeExtractJSON(raw);
+        }
+      } catch (e: unknown) {
+        const err = e as Error;
+        console.warn('Gemini primary attempt error:', err?.message || e);
+        lastError = err;
       }
     }
 
-    // 2. OpenAI Fallback (gpt-4o-mini)
+    // 2. Immediate OpenAI Fallback (gpt-4o-mini - fast and reliable)
     if (!parsedResult && openaiKey) {
       console.log('🤖 Falling back to OpenAI (gpt-4o-mini)...');
       try {
@@ -261,8 +229,7 @@ OUTPUT SCHEMA (STRICT JSON ONLY):
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
           {
             role: 'system',
-            content:
-              'You are an expert multilingual lexicographer and CEFR language educator. Always respond in valid JSON.',
+            content: 'You are a certified lexicographer and CEFR language educator. Always output valid JSON.',
           },
         ];
 
@@ -308,7 +275,7 @@ OUTPUT SCHEMA (STRICT JSON ONLY):
       }
     }
 
-    // 3. Mistral Fallback (text only)
+    // 3. Immediate Mistral Fallback (text only)
     if (!parsedResult && mistralKey && text) {
       console.log('🤖 Falling back to Mistral AI...');
       try {
@@ -352,7 +319,7 @@ OUTPUT SCHEMA (STRICT JSON ONLY):
       );
     }
 
-    // Sanitize and ensure definition and definitionEn are always synchronized
+    // Sanitize and ensure definitions are aligned
     parsedResult.extractedText = parsedResult.extractedText || text || '';
     parsedResult.annotations = Array.isArray(parsedResult.annotations)
       ? parsedResult.annotations.map((ann) => {
