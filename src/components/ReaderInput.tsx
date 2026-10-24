@@ -43,6 +43,50 @@ const SAMPLE_TEXT_EN = `The relentless pace of technological advancement has cre
 
 const SAMPLE_TEXT_ES = `Tita no estaba conforme. Una gran cantidad de dudas salían a su mente. Por ejemplo, le agradaría saber si alguien consideró que en un perfecto plan para amparar a una figura familiar se debía pagar un precio tan alto. ¿Si Tita no podía casarse ni tener hijos al llegar a la senectud, quién se encargaría de atenderla? Tras el fallecimiento de su madre, ¿valía la pena continuar con aquella tradición opresiva?`;
 
+// Client-side image compression: downscales oversized screenshots to max 1600px
+// and converts to efficient JPEG/PNG, preventing Vercel 4.5MB payload errors
+function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Failed to read image file"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Failed to load image into memory"));
+      img.onload = () => {
+        const maxDim = 1600;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve({ base64: reader.result as string, mimeType: file.type });
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const mimeType = "image/jpeg";
+        const base64 = canvas.toDataURL(mimeType, 0.85);
+        resolve({ base64, mimeType });
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }) => {
   const { t, locale } = useTranslation();
   const [activeTab, setActiveTab] = useState<'text' | 'image'>('text');
@@ -50,6 +94,8 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageMimeType, setImageMimeType] = useState<string>('image/png');
   const [imageFileName, setImageFileName] = useState<string | null>(null);
+  const [imageSizeFormatted, setImageSizeFormatted] = useState<string | null>(null);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<string>('auto');
   const [targetLevel, setTargetLevel] = useState<string>('B1');
   const [l1Language, setL1Language] = useState<string>('Russian');
@@ -100,27 +146,36 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
     return () => window.removeEventListener('paste', handlePaste);
   }, [activeTab]);
 
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file (PNG, JPG, WEBP).');
+  const handleFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file (PNG, JPG, WEBP).");
       return;
     }
 
-    if (file.size > 12 * 1024 * 1024) {
-      alert('File size exceeds 12 MB limit.');
-      return;
-    }
-
-    setImageMimeType(file.type);
     setImageFileName(file.name);
+    setIsProcessingImage(true);
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setImageBase64(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const { base64, mimeType } = await compressImage(file);
+      setImageBase64(base64);
+      setImageMimeType(mimeType);
+      const approxKb = Math.round((base64.length * 3) / 4 / 1024);
+      setImageSizeFormatted(`${approxKb} KB`);
+    } catch (e) {
+      console.warn("Client image compression fallback:", e);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setImageBase64(reader.result);
+          setImageMimeType(file.type);
+          const approxKb = Math.round((reader.result.length * 3) / 4 / 1024);
+          setImageSizeFormatted(`${approxKb} KB`);
+        }
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsProcessingImage(false);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -163,7 +218,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
     }
   };
 
-  const canSubmit = !isLoading && (activeTab === 'text' ? text.trim().length > 10 : !!imageBase64);
+  const canSubmit = !isLoading && !isProcessingImage && (activeTab === 'text' ? text.trim().length > 10 : !!imageBase64);
 
   return (
     <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-brand-200 shadow-sm p-6 sm:p-8">
@@ -290,7 +345,7 @@ export const ReaderInput: React.FC<ReaderInputProps> = ({ onAnalyze, isLoading }
                       {imageFileName}
                     </p>
                     <p className="text-xs text-green-700 font-medium mt-0.5">
-                      ✓ Ready for Multilingual OCR reading
+                      ✓ Ready for OCR reading ${imageSizeFormatted ? `(${imageSizeFormatted} - optimized)` : ""}
                     </p>
                   </div>
                 </div>

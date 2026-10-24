@@ -126,7 +126,7 @@ The user is a language learner at CEFR level ${targetLevel}.
 Native language for translations (L1): ${l1Language}.
 
 Tasks:
-1. If an image is provided, perform OCR to extract the original text cleanly in its source language. If text is provided, use that text.
+1. OCR & Extraction: If an image or screenshot is provided, perform high-fidelity, complete OCR transcription of ALL visible text into "extractedText", preserving full paragraph structure, sentence sequence, and word order verbatim. Do NOT summarize or skip paragraphs. If text is provided directly, use that text.
 2. Detect language (e.g. "Spanish", "English", "French").
 3. Identify all vocabulary, idioms, or expressions that are ABOVE level ${targetLevel} (e.g. for A2, highlight B1, B2, C1, C2; for B1, highlight B2, C1, C2).
 4. Annotate unique above-level items (maximum 30 most relevant items):
@@ -182,10 +182,12 @@ Return strict JSON only matching this format:
         const contentsParts: Array<Record<string, unknown>> = [];
 
         if (imageBase64) {
+          const match = imageBase64.match(/^data:([^;]+);base64,/);
+          const detectedMime = match ? match[1] : (imageMimeType || 'image/jpeg');
           const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
           contentsParts.push({
             inlineData: {
-              mimeType: imageMimeType || 'image/png',
+              mimeType: detectedMime,
               data: cleanBase64,
             },
           });

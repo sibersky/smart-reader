@@ -213,7 +213,7 @@ export const InteractiveReader: React.FC<InteractiveReaderProps> = ({
     if (!paragraph.trim()) return <p key={pIdx} className="h-4" />;
 
     // Split paragraph by word boundaries while keeping words and punctuation separate
-    const tokens = paragraph.split(/(\s+|[.,!?:;"'()—–]+)/g);
+    const tokens = paragraph.split(/(\s+|[.,!?:;"'()—–¿¡«»“”„…]+)/gu);
 
     return (
       <p key={pIdx} className="mb-5 leading-loose">
